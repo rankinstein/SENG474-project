@@ -2,3 +2,6 @@
 key.json
 *.pyc
 .Python
+*.pdf
+*.csv
+*.arff

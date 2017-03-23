@@ -14,12 +14,13 @@ whitespace_condesing = re.compile('\s+')
 
 def process_args(argv):
     try:
-        opts, args = getopt.getopt(argv,"hd:s:o:r:l:",["datafile=","subreddit=","offset=","rows=","limit="])
+        opts, args = getopt.getopt(argv,"htd:s:o:r:l:",["testing", "datafile=","subreddit=","offset=","rows=","limit="])
     except getopt.GetoptError:
         print('test.py -i <inputfile> -o <outputfile>')
         sys.exit(2)
     offset = 0
     limit = 1000
+    test_set = False
     for opt, arg in opts:
         if opt == '-h':
             print('query.py --datafile <data.csv> --subreddit <subreddit to query> --offset <integer> --rows <integer> --limit <integer>')
@@ -34,19 +35,16 @@ def process_args(argv):
             total_rows = int(arg)
         elif opt in ('-l', '--limit'):
             limit = int(arg)
-    return (file_name, subreddit, offset, limit, total_rows)
+        elif opt in ('-t', '--testing'):
+            test_set = True
+    return (file_name, subreddit, offset, limit, total_rows, test_set)
 
-def get_data(file_name, subreddit, offset, limit, total_rows):
+def get_data(file_name, subreddit, offset, limit, total_rows, test_set = False):
     json_key = 'key.json'
 
     client = get_client(json_key_file=json_key, readonly=True)
 
-    data_query = """
-    SELECT
-        gilded > 0 as gilded,
-        title,
-        selftext
-    FROM
+    training_tables = """
         [fh-bigquery:reddit_posts.2015_12],
         [fh-bigquery:reddit_posts.2016_01],
         [fh-bigquery:reddit_posts.2016_02],
@@ -61,18 +59,33 @@ def get_data(file_name, subreddit, offset, limit, total_rows):
         [fh-bigquery:reddit_posts.2016_11],
         [fh-bigquery:reddit_posts.2016_12],
         [fh-bigquery:reddit_posts.2017_01]
+    """
+
+    test_tables = """
+        [fh-bigquery:reddit_posts.2017_02]
+    """
+
+    tables = test_tables if test_set else training_tables
+
+    data_query = """
+    SELECT
+        gilded > 0 as gilded,
+        title,
+        selftext
+    FROM
+        {3}
     WHERE
         subreddit="{0}"
     LIMIT
         {1}
     OFFSET
         {2}
-    """.format(subreddit, limit, offset)
+    """.format(subreddit, limit, offset, tables)
     # print('query: {0}'.format(data_query))
     job_id, _result = client.query(data_query)
     complete, row_count = client.check_job(job_id)
     results = client.get_query_rows(job_id)
-    fields = list(map(lambda x: [1 if bool(x['gilded']) else 0, clean_document(x['title'], x['selftext'])], results))
+    fields = list(map(lambda x: [clean_document(x['title'], x['selftext']), 1 if bool(x['gilded']) else 0], results))
     with open(file_name, 'a') as f:
         writer = csv.writer(f)
         for line in fields:
@@ -109,5 +122,5 @@ def clean_document(title, selftext):
     return text.strip()
 
 if __name__ == '__main__':
-    (file_name, subreddit, offset, limit, total_rows) = process_args(sys.argv[1:])
-    get_data(file_name, subreddit, offset, limit, total_rows)
+    (file_name, subreddit, offset, limit, total_rows, test_set) = process_args(sys.argv[1:])
+    get_data(file_name, subreddit, offset, limit, total_rows, test_set)
